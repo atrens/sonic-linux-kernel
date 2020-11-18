@@ -3,16 +3,16 @@ SHELL = /bin/bash
 .SHELLFLAGS += -e
 
 KERNEL_ABI_MINOR_VERSION = 2
-KVERSION_SHORT ?= 4.9.0-11-$(KERNEL_ABI_MINOR_VERSION)
+KVERSION_SHORT ?= 4.19.0-9-$(KERNEL_ABI_MINOR_VERSION)
 KVERSION ?= $(KVERSION_SHORT)-amd64
-KERNEL_VERSION ?= 4.9.189
-KERNEL_SUBVERSION ?= 3+deb9u2
+KERNEL_VERSION ?= 4.19.118
+KERNEL_SUBVERSION ?= 2+deb10u1
 kernel_procure_method ?= build
 CONFIGURED_ARCH ?= amd64
 
 LINUX_HEADER_COMMON = linux-headers-$(KVERSION_SHORT)-common_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION)_all.deb
 LINUX_HEADER_AMD64 = linux-headers-$(KVERSION)_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION)_$(CONFIGURED_ARCH).deb
-LINUX_IMAGE = linux-image-$(KVERSION)_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION)_$(CONFIGURED_ARCH).deb
+LINUX_IMAGE = linux-image-$(KVERSION)-unsigned_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION)_$(CONFIGURED_ARCH).deb
 
 MAIN_TARGET = $(LINUX_HEADER_COMMON)
 DERIVED_TARGETS = $(LINUX_HEADER_AMD64) $(LINUX_IMAGE)
@@ -44,13 +44,14 @@ else
 # Building kernel
 
 DSC_FILE = linux_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION).dsc
-ORIG_FILE = linux_$(KERNEL_VERSION).orig.tar.xz
 DEBIAN_FILE = linux_$(KERNEL_VERSION)-$(KERNEL_SUBVERSION).debian.tar.xz
+ORIG_FILE = linux_$(KERNEL_VERSION).orig.tar.xz
 BUILD_DIR=linux-$(KERNEL_VERSION)
+SOURCE_FILE_BASE_URL="http://security.debian.org/debian-security/pool/updates/main/l/linux"
 
-DSC_FILE_URL = "http://security.debian.org/debian-security/pool/updates/main/l/linux/linux_4.9.189-3+deb9u2.dsc"
-DEBIAN_FILE_URL = "http://security.debian.org/debian-security/pool/updates/main/l/linux/linux_4.9.189-3+deb9u2.debian.tar.xz"
-ORIG_FILE_URL = "http://security.debian.org/debian-security/pool/updates/main/l/linux/linux_4.9.189.orig.tar.xz"
+DSC_FILE_URL = "$(SOURCE_FILE_BASE_URL)/$(DSC_FILE)"
+DEBIAN_FILE_URL = "$(SOURCE_FILE_BASE_URL)/$(DEBIAN_FILE)"
+ORIG_FILE_URL = "$(SOURCE_FILE_BASE_URL)/$(ORIG_FILE)"
 
 $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	# Obtaining the Debian kernel source
@@ -74,9 +75,9 @@ $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	debian/bin/gencontrol.py
 
 	# generate linux build file for amd64_none_amd64
-	fakeroot make -f debian/rules.gen setup_armhf_none_armmp
-	fakeroot make -f debian/rules.gen setup_arm64_none
-	fakeroot make -f debian/rules.gen setup_amd64_none_amd64
+	fakeroot make -f debian/rules.gen DEB_HOST_ARCH=armhf setup_armhf_none_armmp
+	fakeroot make -f debian/rules.gen DEB_HOST_ARCH=arm64 setup_arm64_none_arm64
+	fakeroot make -f debian/rules.gen DEB_HOST_ARCH=amd64 setup_amd64_none_amd64
 
 	# Applying patches and configuration changes
 	git add debian/build/build_armhf_none_armmp/.config -f
@@ -92,12 +93,17 @@ $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	stg repair
 	stg import -s ../patch/series
 
+	# Optionally add/remove kernel options
+	if [ -f ../manage-config ]; then
+		../manage-config $(CONFIGURED_ARCH)
+	fi
+
 	# Building a custom kernel from Debian kernel source
-	DO_DOCS=False fakeroot make -f debian/rules -j $(shell nproc) binary-indep
+	ARCH=$(CONFIGURED_ARCH) DEB_HOST_ARCH=$(CONFIGURED_ARCH) DEB_BUILD_PROFILES=nodoc fakeroot make -f debian/rules -j $(shell nproc) binary-indep
 ifeq ($(CONFIGURED_ARCH), armhf)
-	fakeroot make -f debian/rules.gen -j $(shell nproc) binary-arch_$(CONFIGURED_ARCH)_none_armmp
+	ARCH=$(CONFIGURED_ARCH) DEB_HOST_ARCH=$(CONFIGURED_ARCH) fakeroot make -f debian/rules.gen -j $(shell nproc) binary-arch_$(CONFIGURED_ARCH)_none_armmp
 else
-	fakeroot make -f debian/rules.gen -j $(shell nproc) binary-arch_$(CONFIGURED_ARCH)_none
+	ARCH=$(CONFIGURED_ARCH) DEB_HOST_ARCH=$(CONFIGURED_ARCH) fakeroot make -f debian/rules.gen -j $(shell nproc) binary-arch_$(CONFIGURED_ARCH)_none_$(CONFIGURED_ARCH)
 endif
 	popd
 
